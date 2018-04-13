@@ -63,7 +63,7 @@ class Vocab(object):
         max_size = None if max_size is None else max_size + len(self.itos)
 
         # sort by frequency, then alphabetically
-        words_and_frequencies = sorted(counter.items(), key=lambda tup: tup[0])
+        words_and_frequencies = sorted(counter.items(), key=lambda tup: tup[0])      
         words_and_frequencies.sort(key=lambda tup: tup[1], reverse=True)
 
         for word, freq in words_and_frequencies:
@@ -175,6 +175,147 @@ class Vocab(object):
                 self.vectors[i] = vectors[wv_index]
             else:
                 self.vectors[i] = unk_init(self.vectors[i])
+
+
+class CategoricalUnkVocab(Vocab):
+
+    def __init__(self, counter, max_size=None, min_freq=1, specials=['<pad>'],
+                 vectors=None, unk_init=None, vectors_cache=None):
+        """Create a Vocab object from a collections.Counter.
+
+        Arguments:
+            counter: collections.Counter object holding the frequencies of
+                each value found in the data.
+            max_size: The maximum size of the vocabulary, or None for no
+                maximum. Default: None.
+            min_freq: The minimum frequency needed to include a token in the
+                vocabulary. Values less than 1 will be set to 1. Default: 1.
+            specials: The list of special tokens (e.g., padding or eos) that
+                will be prepended to the vocabulary in addition to an <unk>
+                token. Default: ['<pad>']
+            vectors: One of either the available pretrained vectors
+                or custom pretrained vectors (see Vocab.load_vectors);
+                or a list of aforementioned vectors
+            unk_init (callback): by default, initialize out-of-vocabulary word vectors
+                to zero vectors; can be any function that takes in a Tensor and
+                returns a Tensor of the same size. Default: torch.Tensor.zero_
+            vectors_cache: directory for cached vectors. Default: '.vector_cache'
+        """
+        self.freqs = counter
+        counter = counter.copy()
+        min_freq = max(min_freq, 1)
+
+        self.itos = list(specials)
+        # frequencies of special tokens are not counted when building vocabulary
+        # in frequency order
+        for tok in specials:
+            del counter[tok]
+
+        max_size = None if max_size is None else max_size + len(self.itos)
+
+        # sort by frequency, then alphabetically
+        words_and_frequencies = sorted(counter.items(), key=lambda tup: tup[0])
+        words_and_frequencies.sort(key=lambda tup: tup[1], reverse=True)
+
+        for word, freq in words_and_frequencies:
+            if freq < min_freq or len(self.itos) == max_size:
+                break
+            self.itos.append(word)
+
+        self.init_stoi = defaultdict(_default_unk_index)
+        # stoi is simply a reverse dict for itos
+        self.init_stoi.update({tok: i for i, tok in enumerate(self.itos)})
+
+        # build real stoi for categorial unk
+        UNK_TOKEN = self.itos[0]        
+        def unkify(token, words_dict, unk_token):
+            """
+            unkify for English tokens
+            """
+            if len(token.rstrip()) == 0:
+                return unk_token
+            elif not(token.rstrip() in words_dict):
+                numCaps = 0
+                hasDigit = False
+                hasDash = False
+                hasLower = False
+                for char in token.rstrip():
+                    if char.isdigit():
+                        hasDigit = True
+                    elif char == '-':
+                        hasDash = True
+                    elif char.isalpha():
+                        if char.islower():
+                            hasLower = True
+                        elif char.isupper():
+                            numCaps += 1
+                result = unk_token
+                lower = token.rstrip().lower()
+                ch0 = token.rstrip()[0]
+                if ch0.isupper():
+                    if numCaps == 1:
+                        result = result + '-INITC'    
+                        if lower in words_dict:
+                            result = result + '-KNOWNLC'
+                    else:
+                        result = result + '-CAPS'
+                elif not(ch0.isalpha()) and numCaps > 0:
+                    result = result + '-CAPS'
+                elif hasLower:
+                    result = result + '-LC'
+                if hasDigit:
+                    result = result + '-NUM'
+                if hasDash:
+                    result = result + '-DASH' 
+                if lower[-1] == 's' and len(lower) >= 3:
+                    ch2 = lower[-2]
+                    if not(ch2 == 's') and not(ch2 == 'i') and not(ch2 == 'u'):
+                        result = result + '-s'
+                elif len(lower) >= 5 and not(hasDash) and not(hasDigit and numCaps > 0):
+                    if lower[-2:] == 'ed':
+                        result = result + '-ed'
+                    elif lower[-3:] == 'ing':
+                        result = result + '-ing'
+                    elif lower[-3:] == 'ion':
+                        result = result + '-ion'
+                    elif lower[-2:] == 'er':
+                        result = result + '-er'            
+                    elif lower[-3:] == 'est':
+                        result = result + '-est'
+                    elif lower[-2:] == 'ly':
+                        result = result + '-ly'
+                    elif lower[-3:] == 'ity':
+                        result = result + '-ity'
+                    elif lower[-1] == 'y':
+                        result = result + '-y'
+                    elif lower[-2:] == 'al':
+                        result = result + '-al'
+                return result
+            else:
+                return token
+
+        class categorical_unk_dic(defaultdict):
+            def __missing__(self, key):
+                unkified_key = unkify(key, self, UNK_TOKEN)
+                if unkified_key in self:
+                    return self.get(unkified_key)
+                else:
+                    return self.get(UNK_TOKEN)
+                
+        self.stoi = categorical_unk_dic()
+        for k, v in self.init_stoi.items():
+            self.stoi[k] = v
+        for token in counter:
+            unkified_token = unkify(token, self.init_stoi, UNK_TOKEN)
+            if unkified_token != UNK_TOKEN and unkified_token not in self.stoi:
+                self.itos.append(unkified_token)
+                self.stoi[unkified_token] = len(self.itos) - 1
+
+        self.vectors = None
+        if vectors is not None:
+            self.load_vectors(vectors, unk_init=unk_init, cache=vectors_cache)
+        else:
+            assert unk_init is None and vectors_cache is None   
 
 
 class SubwordVocab(Vocab):

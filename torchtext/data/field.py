@@ -8,7 +8,7 @@ from tqdm import tqdm
 from .dataset import Dataset
 from .pipeline import Pipeline
 from .utils import get_tokenizer
-from ..vocab import Vocab, SubwordVocab
+from ..vocab import Vocab, SubwordVocab, CategoricalUnkVocab
 
 
 class RawField(object):
@@ -130,7 +130,7 @@ class Field(RawField):
         torch.LongTensor: int,
         torch.cuda.LongTensor: int
     }
-
+    
     def __init__(self, sequential=True, use_vocab=True, init_token=None,
                  eos_token=None, fix_length=None, tensor_type=torch.LongTensor,
                  preprocessing=None, postprocessing=None, lower=False,
@@ -153,7 +153,7 @@ class Field(RawField):
         self.pad_token = pad_token if self.sequential else None
         self.pad_first = pad_first
         self.truncate_first = truncate_first
-
+        
     def preprocess(self, x):
         """Load a single example using this field, tokenizing if necessary.
 
@@ -320,6 +320,10 @@ class Field(RawField):
         if self.include_lengths:
             return Variable(arr, volatile=not train), lengths
         return Variable(arr, volatile=not train)
+
+
+class CategoricalUnkField(Field):
+    vocab_cls = CategoricalUnkVocab
 
 
 class ReversibleField(Field):

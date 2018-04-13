@@ -26,7 +26,7 @@ class Pipeline(object):
         self.pipes = [self]
 
     def __call__(self, x, *args):
-        """Apply the the current Pipeline(s) to an input.
+        """Apply the current Pipeline(s) to an input.
 
         Arguments:
             x: The input to process with the Pipeline(s).
